@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# When docker restarts, this file is still there,
+# so we need to kill it just in case
+[ -f /tmp/.X99-lock ] && rm -f /tmp/.X99-lock
+
 # ---------- Xvfb ----------
 echo "[entrypoint] Starting Xvfb on ${DISPLAY} (${SCREEN_WIDTH}x${SCREEN_HEIGHT}x${SCREEN_DEPTH})"
 Xvfb "${DISPLAY}" \
@@ -30,9 +34,9 @@ if [[ "${ENABLE_VNC,,}" == "true" || "${ENABLE_VNC}" == "1" ]]; then
   VNC_ARGS=(-display "${DISPLAY}" -forever -shared -rfbport "${VNC_PORT}" -noxdamage)
 
   if [[ -n "${VNC_PASSWORD}" ]]; then
-    mkdir -p /home/chrome/.vnc
-    x11vnc -storepasswd "${VNC_PASSWORD}" /home/chrome/.vnc/passwd
-    VNC_ARGS+=(-rfbauth /home/chrome/.vnc/passwd)
+    mkdir -p /root/.vnc
+    x11vnc -storepasswd "${VNC_PASSWORD}" /root/.vnc/passwd
+    VNC_ARGS+=(-rfbauth /root/.vnc/passwd)
   else
     VNC_ARGS+=(-nopw)
   fi
@@ -96,11 +100,12 @@ if [[ $# -gt 0 ]]; then
   CHROME_ARGS+=("$@")
 fi
 
-# ---------- socat proxy for DevTools ----------
-echo "[entrypoint] Starting socat forwarder 0.0.0.0:${CHROME_REMOTE_DEBUGGING_PORT} -> 127.0.0.1:${INTERNAL_DEBUG_PORT}"
-socat TCP-LISTEN:"${CHROME_REMOTE_DEBUGGING_PORT}",fork,bind=0.0.0.0,reuseaddr \
-     TCP-CONNECT:127.0.0.1:"${INTERNAL_DEBUG_PORT}" &
-SOCAT_PID=$!
+# ---------- CDP proxy for DevTools ----------
+# cdp-proxy.js: listens on 0.0.0.0:PORT, forwards to Chrome on 127.0.0.1:PORT+1
+# with Host rewriting, and rewrites ws:// URLs in JSON responses so any
+# client host gets back correct WebSocket endpoints without client-side hackery.
+echo "[entrypoint] Starting cdp-proxy 0.0.0.0:${CHROME_REMOTE_DEBUGGING_PORT} -> 127.0.0.1:${INTERNAL_DEBUG_PORT}"
+node /cdp-proxy.js &
 
 echo "[entrypoint] Launching Chrome"
 echo "[entrypoint]   user-data-dir = ${CHROME_USER_DATA_DIR}"

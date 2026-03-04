@@ -61,8 +61,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxshmfence1 \
     libvulkan1 \
     xdg-utils \
-    # socat to forward DevTools port (Chrome binds to 127.0.0.1 only)
-    socat \
+    # nodejs for the cdp-proxy.js DevTools reverse proxy
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Google Chrome Stable
@@ -70,15 +70,12 @@ RUN wget -q -O /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome
     && apt install -y /tmp/chrome.deb \
     && rm /tmp/chrome.deb
 
-# Create non-root user
-RUN groupadd -r chrome && useradd -r -g chrome -G audio,video -m -s /bin/bash chrome
-
 # Prepare directories
-RUN mkdir -p /data/chrome-profile /tmp/.X11-unix \
-    && chown -R chrome:chrome /data /tmp/.X11-unix
+RUN mkdir -p /data/chrome-profile /tmp/.X11-unix
 
-# Copy entrypoint
+# Copy entrypoint and CDP proxy
 COPY entrypoint.sh /entrypoint.sh
+COPY cdp-proxy.js  /cdp-proxy.js
 RUN chmod +x /entrypoint.sh
 
 # Expose ports: 9222 = Chrome DevTools, 5900 = VNC
@@ -87,7 +84,6 @@ EXPOSE ${CHROME_REMOTE_DEBUGGING_PORT} 5900
 # Mount point for Chrome user data
 VOLUME ["/data/chrome-profile"]
 
-USER chrome
-WORKDIR /home/chrome
+WORKDIR /root
 
 ENTRYPOINT ["/entrypoint.sh"]
